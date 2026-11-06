@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-01C3</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 2rem auto; max-width: 36rem; padding: 0 1rem; }
+    select, input, button { font: inherit; margin: .25rem 0; }
+    progress { width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>T-01C3</h1>
+  <h2>1. Wi-Fi</h2>
+  <select id="ssid" size="6"></select>
+  <input id="pass" placeholder="Wi-Fi password">
+  <button id="go">Connect</button>
+  <p id="wifi-status"></p>
+  <h2>2. Firmware</h2>
+  <input id="fw" type="file" accept=".bin,application/octet-stream">
+  <button id="up">Upload</button>
+  <progress id="p" value="0" max="100"></progress>
+  <p id="fw-status"></p>
+  <script>
+    fetch('/scan').then(r => r.json()).then(list => {
+      const sel = document.getElementById('ssid');
+      sel.innerHTML = '';
+      list.forEach(a => {
+        const o = document.createElement('option');
+        o.value = a.ssid;
+        o.textContent = a.ssid + ' (' + a.rssi + ' dBm)';
+        sel.appendChild(o);
+      });
+    });
+    document.getElementById('go').onclick = () => {
+      const ssid = document.getElementById('ssid').value;
+      if (!ssid) return;
+      const pass = document.getElementById('pass').value;
+      const status = document.getElementById('wifi-status');
+      status.textContent = 'Connecting...';
+      fetch('/connect?ssid=' + encodeURIComponent(ssid) + '&password=' + encodeURIComponent(pass), { method: 'POST' })
+        .then(r => r.text()).then(t => status.textContent = t)
+        .catch(() => status.textContent = 'connection failed');
+    };
+    document.getElementById('up').onclick = () => {
+      const f = document.getElementById('fw').files[0];
+      if (!f) return;
+      const status = document.getElementById('fw-status');
+      const x = new XMLHttpRequest();
+      x.open('POST', '/update');
+      x.setRequestHeader('Content-Type', 'application/octet-stream');
+      x.upload.onprogress = e => { if (e.lengthComputable) document.getElementById('p').value = e.loaded * 100 / e.total; };
+      x.onload = () => status.textContent = x.responseText || 'failed';
+      x.onerror = () => status.textContent = 'failed';
+      x.send(f);
+    };
+  </script>
+</body>
+</html>
