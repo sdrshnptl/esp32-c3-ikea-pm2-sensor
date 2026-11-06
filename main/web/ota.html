@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-01C3 Firmware Update</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 3rem auto; max-width: 36rem; padding: 0 1rem; }
+    button, input { font: inherit; margin: 0.5rem 0; }
+    progress { width: 100%; }
+    #status { min-height: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>T-01C3 Firmware Update</h1>
+  <p>Select the ESP-IDF application binary (<code>build/esp32-c3-ikea-pm2-sensor.bin</code>).</p>
+  <form id="upload-form">
+    <input id="firmware" type="file" accept=".bin,application/octet-stream" required>
+    <button id="submit" type="submit">Upload firmware</button>
+  </form>
+  <progress id="progress" value="0" max="100"></progress>
+  <p id="status" role="status" aria-live="polite"></p>
+  <script>
+    const form = document.getElementById("upload-form");
+    const fileInput = document.getElementById("firmware");
+    const button = document.getElementById("submit");
+    const progress = document.getElementById("progress");
+    const status = document.getElementById("status");
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      button.disabled = true;
+      status.textContent = "Uploading...";
+      progress.value = 0;
+
+      const request = new XMLHttpRequest();
+      request.open("POST", "/update");
+      request.setRequestHeader("Content-Type", "application/octet-stream");
+      request.upload.addEventListener("progress", (uploadEvent) => {
+        if (uploadEvent.lengthComputable) {
+          progress.value = Math.round(uploadEvent.loaded * 100 / uploadEvent.total);
+        }
+      });
+      request.addEventListener("load", () => {
+        status.textContent = request.responseText || `Upload failed (${request.status})`;
+        button.disabled = false;
+      });
+      request.addEventListener("error", () => {
+        status.textContent = "Upload failed. Check the connection and try again.";
+        button.disabled = false;
+      });
+      request.send(file);
+    });
+  </script>
+</body>
+</html>
