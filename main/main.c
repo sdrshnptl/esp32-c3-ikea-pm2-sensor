@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 
+#include "pm1006.h"
 #include "web.h"
 #include "wifi_manager.h"
 
@@ -22,6 +23,12 @@ static void confirm_ota(void)
 void app_main(void)
 {
     ESP_ERROR_CHECK(wifi_manager_init());
+
+    esp_err_t sensor_err = pm1006_init();
+    if (sensor_err != ESP_OK) {
+        ESP_LOGE(TAG, "PM1006 init failed: %s", esp_err_to_name(sensor_err));
+    }
+
     ESP_ERROR_CHECK(web_start());
     confirm_ota();
 }

@@ -1,30 +1,102 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "pm1006.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "web";
 
-extern const char provision_html_start[] asm("_binary_provision_html_start");
-extern const char provision_html_end[] asm("_binary_provision_html_end");
+extern const char dashboard_html_start[] asm("_binary_dashboard_html_start");
+extern const char dashboard_html_end[] asm("_binary_dashboard_html_end");
+extern const char settings_html_start[] asm("_binary_settings_html_start");
+extern const char settings_html_end[] asm("_binary_settings_html_end");
+
+/* The VINDRIKTNING control board emits frames every few seconds; a reading
+ * older than this is treated as a dropped sensor link. */
+#define SENSOR_ONLINE_TIMEOUT_MS 30000
 
 static uint8_t s_ota_buffer[4096];
 
-static esp_err_t root_handler(httpd_req_t *req)
+static esp_err_t send_html(httpd_req_t *req, const char *start, const char *end)
 {
     esp_err_t err = httpd_resp_set_type(req, "text/html; charset=utf-8");
     if (err != ESP_OK) {
         return err;
     }
-    return httpd_resp_send(req, provision_html_start, provision_html_end - provision_html_start);
+    return httpd_resp_send(req, start, end - start - 1);
+}
+
+static esp_err_t root_handler(httpd_req_t *req)
+{
+    return send_html(req, dashboard_html_start, dashboard_html_end);
+}
+
+static esp_err_t settings_handler(httpd_req_t *req)
+{
+    return send_html(req, settings_html_start, settings_html_end);
+}
+
+static void json_escape(char *dst, size_t dst_len, const char *src)
+{
+    size_t out = 0;
+    for (; *src != '\0' && out + 2 < dst_len; src++) {
+        unsigned char c = (unsigned char)*src;
+        if (c == '"' || c == '\\') {
+            dst[out++] = '\\';
+            dst[out++] = (char)c;
+        } else {
+            dst[out++] = c < 0x20 ? '?' : (char)c;
+        }
+    }
+    dst[out] = '\0';
+}
+
+static esp_err_t data_handler(httpd_req_t *req)
+{
+    pm1006_reading_t reading = {0};
+    if (pm1006_get_reading(&reading) != ESP_OK) {
+        reading.age_ms = UINT32_MAX;
+    }
+    bool online = reading.valid && reading.age_ms <= SENSOR_ONLINE_TIMEOUT_MS;
+
+    char ssid[36] = {0};
+    int rssi = 0;
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        json_escape(ssid, sizeof(ssid), (const char *)ap.ssid);
+        rssi = ap.rssi;
+    }
+
+    char ip[16] = {0};
+    wifi_manager_get_ip(ip, sizeof(ip));
+
+    const esp_app_desc_t *app = esp_app_get_description();
+    char json[512];
+    int len = snprintf(json, sizeof(json),
+                       "{\"pm25\":%u,\"sensor_online\":%s,\"age_ms\":%lu,"
+                       "\"frames_ok\":%lu,\"frames_bad\":%lu,\"rx_bytes\":%lu,\"uptime_s\":%lu,"
+                       "\"heap\":%lu,\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\","
+                       "\"fw\":\"%s\",\"idf\":\"%s\"}",
+                       reading.pm25, online ? "true" : "false", (unsigned long)reading.age_ms,
+                       (unsigned long)reading.frames_ok, (unsigned long)reading.frames_bad,
+                       (unsigned long)reading.rx_bytes,
+                       (unsigned long)(esp_timer_get_time() / 1000000),
+                       (unsigned long)esp_get_free_heap_size(), ssid, rssi, ip, app->version,
+                       app->idf_ver);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, json, len);
 }
 
 static esp_err_t scan_handler(httpd_req_t *req)
@@ -131,11 +203,15 @@ esp_err_t web_start(void)
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "httpd start");
 
     const httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = root_handler };
+    const httpd_uri_t settings = { .uri = "/settings", .method = HTTP_GET, .handler = settings_handler };
+    const httpd_uri_t data = { .uri = "/api/data", .method = HTTP_GET, .handler = data_handler };
     const httpd_uri_t scan = { .uri = "/scan", .method = HTTP_GET, .handler = scan_handler };
     const httpd_uri_t conn = { .uri = "/connect", .method = HTTP_POST, .handler = connect_handler };
     const httpd_uri_t update = { .uri = "/update", .method = HTTP_POST, .handler = update_handler };
 
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &root), TAG, "register /");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &settings), TAG, "register /settings");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &data), TAG, "register /api/data");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &scan), TAG, "register /scan");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &conn), TAG, "register /connect");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &update), TAG, "register /update");

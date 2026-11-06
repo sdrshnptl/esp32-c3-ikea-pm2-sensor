@@ -3,56 +3,120 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>T-01C3</title>
+  <title>T-01C3 · Settings</title>
   <style>
-    body { font: 16px system-ui, sans-serif; margin: 2rem auto; max-width: 36rem; padding: 0 1rem; }
-    select, input, button { font: inherit; margin: .25rem 0; }
-    progress { width: 100%; }
+    :root { --accent:#2563eb; --bg:#f4f6fb; --card:#ffffff; --text:#1e293b; --muted:#64748b; --ok:#16a34a; --err:#dc2626; --border:#e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 40rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    header { text-align: center; padding: 1rem 0 1.25rem; }
+    header h1 { margin: 0; font-size: 1.6rem; letter-spacing: .5px; }
+    header p { margin: .25rem 0 0; color: var(--muted); font-size: .9rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.25rem; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+    .card h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
+    label { display: block; color: var(--muted); font-size: .8rem; margin: .6rem 0 .25rem; }
+    select, input[type=password] { width: 100%; padding: .6rem .7rem; font: inherit; color: inherit; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+    select { min-height: 8.5rem; }
+    button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: .6rem 1rem; cursor: pointer; background: var(--accent); color: #fff; margin-top: .75rem; }
+    button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .row { display: flex; gap: .5rem; }
+    .row button { flex: 1; margin-top: .75rem; }
+    input[type=file] { width: 100%; font: inherit; }
+    progress { width: 100%; height: .9rem; margin-top: .75rem; accent-color: var(--accent); }
+    .status { min-height: 1.3rem; margin: .5rem 0 0; font-size: .9rem; color: var(--muted); }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+    a.back { display: inline-flex; align-items: center; gap: .35rem; padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--border); background: #fff; color: var(--accent); font-size: .85rem; font-weight: 600; text-decoration: none; }
+    a.back:hover { border-color: var(--accent); }
+    footer { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 1rem; }
   </style>
 </head>
 <body>
-  <h1>T-01C3</h1>
-  <h2>1. Wi-Fi</h2>
-  <select id="ssid" size="6"></select>
-  <input id="pass" placeholder="Wi-Fi password">
-  <button id="go">Connect</button>
-  <p id="wifi-status"></p>
-  <h2>2. Firmware</h2>
-  <input id="fw" type="file" accept=".bin,application/octet-stream">
-  <button id="up">Upload</button>
-  <progress id="p" value="0" max="100"></progress>
-  <p id="fw-status"></p>
+  <div class="wrap">
+    <header>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem">
+        <a class="back" href="/">← Dashboard</a>
+      </div>
+      <h1>T-01C3</h1>
+      <p>Wi-Fi setup &amp; firmware update</p>
+    </header>
+
+    <section class="card">
+      <h2>Wi-Fi network</h2>
+      <label for="ssid">Available networks</label>
+      <select id="ssid" size="6"></select>
+      <label for="pass">Password</label>
+      <input id="pass" type="password" placeholder="Wi-Fi password" autocomplete="off">
+      <div class="row">
+        <button class="secondary" id="scan" type="button">Scan again</button>
+        <button id="go" type="button">Connect</button>
+      </div>
+      <p class="status" id="wifi-status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Firmware update</h2>
+      <label for="fw">Application binary (.bin)</label>
+      <input id="fw" type="file" accept=".bin,application/octet-stream">
+      <button id="up">Upload firmware</button>
+      <progress id="p" value="0" max="100"></progress>
+      <p class="status" id="fw-status"></p>
+    </section>
+
+    <footer>ESP32-C3 · LILYGO T-01C3</footer>
+  </div>
   <script>
-    fetch('/scan').then(r => r.json()).then(list => {
+    const status = (el, text, ok) => {
+      el.textContent = text;
+      el.className = 'status' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+    };
+
+    function refreshScan() {
       const sel = document.getElementById('ssid');
-      sel.innerHTML = '';
-      list.forEach(a => {
-        const o = document.createElement('option');
-        o.value = a.ssid;
-        o.textContent = a.ssid + ' (' + a.rssi + ' dBm)';
-        sel.appendChild(o);
-      });
-    });
+      sel.innerHTML = '<option disabled>Scanning…</option>';
+      fetch('/scan').then(r => r.json()).then(list => {
+        sel.innerHTML = '';
+        if (!list.length) { sel.innerHTML = '<option disabled>No networks found</option>'; }
+        list.forEach(a => {
+          const o = document.createElement('option');
+          o.value = a.ssid;
+          o.textContent = a.ssid + ' (' + a.rssi + ' dBm)';
+          sel.appendChild(o);
+        });
+      }).catch(() => { sel.innerHTML = '<option disabled>Scan failed</option>'; });
+    }
+
+    document.getElementById('scan').onclick = refreshScan;
+    refreshScan();
+
     document.getElementById('go').onclick = () => {
       const ssid = document.getElementById('ssid').value;
-      if (!ssid) return;
       const pass = document.getElementById('pass').value;
-      const status = document.getElementById('wifi-status');
-      status.textContent = 'Connecting...';
+      if (!ssid) return;
+      const st = document.getElementById('wifi-status');
+      const btn = document.getElementById('go');
+      btn.disabled = true;
+      status(st, 'Connecting…');
       fetch('/connect?ssid=' + encodeURIComponent(ssid) + '&password=' + encodeURIComponent(pass), { method: 'POST' })
-        .then(r => r.text()).then(t => status.textContent = t)
-        .catch(() => status.textContent = 'connection failed');
+        .then(r => r.text()).then(t => status(st, t, t.startsWith('Connected')))
+        .catch(() => status(st, 'Connection failed', false))
+        .finally(() => btn.disabled = false);
     };
+
     document.getElementById('up').onclick = () => {
       const f = document.getElementById('fw').files[0];
       if (!f) return;
-      const status = document.getElementById('fw-status');
+      const st = document.getElementById('fw-status');
+      const btn = document.getElementById('up');
+      btn.disabled = true;
+      status(st, 'Uploading…');
       const x = new XMLHttpRequest();
       x.open('POST', '/update');
       x.setRequestHeader('Content-Type', 'application/octet-stream');
       x.upload.onprogress = e => { if (e.lengthComputable) document.getElementById('p').value = e.loaded * 100 / e.total; };
-      x.onload = () => status.textContent = x.responseText || 'failed';
-      x.onerror = () => status.textContent = 'failed';
+      x.onload = () => { status(st, x.responseText || 'Failed', x.status === 200); };
+      x.onerror = () => status(st, 'Upload failed', false);
       x.send(f);
     };
   </script>

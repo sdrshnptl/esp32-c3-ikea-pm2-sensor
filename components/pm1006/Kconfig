@@ -1,0 +1,26 @@
+menu "PM1006 particulate sensor (IKEA VINDRIKTNING)"
+
+    config PM1006_UART_PORT
+        int "UART port used for the sensor"
+        range 0 1
+        default 1
+        help
+            UART peripheral connected to the sensor. The sensor only transmits,
+            so a single RX line is required.
+
+    config PM1006_UART_RX_GPIO
+        int "UART RX GPIO"
+        range 0 21
+        default 9
+        help
+            GPIO connected to the VINDRIKTNING REST (UART TX) pad. GPIO9 is the
+            default wiring on the LILYGO T-01C3.
+
+    config PM1006_UART_BAUD
+        int "UART baud rate"
+        range 1200 115200
+        default 9600
+        help
+            The PM1006 streams frames at 9600 baud, 8N1.
+
+endmenu

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T-01C3 · Air quality</title>
+  <style>
+    :root { --accent:#2563eb; --bg:#f4f6fb; --card:#ffffff; --text:#1e293b; --muted:#64748b; --ok:#16a34a; --warn:#ca8a04; --err:#dc2626; --border:#e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 44rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+    header { display: flex; align-items: center; gap: 1rem; padding: .5rem 0 1.25rem; }
+    header h1 { margin: 0; font-size: 1.4rem; letter-spacing: .3px; }
+    header p { margin: .1rem 0 0; color: var(--muted); font-size: .85rem; }
+    header .grow { flex: 1; }
+    a.gear { display: inline-flex; align-items: center; gap: .4rem; padding: .5rem .8rem; border-radius: 10px; border: 1px solid var(--border); background: #fff; color: var(--accent); font-size: .85rem; font-weight: 600; text-decoration: none; }
+    a.gear:hover { border-color: var(--accent); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; margin-bottom: 1.1rem; box-shadow: 0 1px 2px rgba(15,23,42,.05); }
+    .hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .hero .label { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+    .reading { display: flex; align-items: baseline; gap: .45rem; }
+    .reading .value { font-size: 3.4rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+    .reading .unit { font-size: .95rem; color: var(--muted); }
+    .reading .value.stale { color: var(--muted); opacity: .5; }
+    .reading .unit.stale { opacity: .5; }
+    .badge { display: inline-block; padding: .3rem .75rem; border-radius: 999px; font-size: .82rem; font-weight: 600; color: #fff; background: var(--muted); }
+    .badge.stale { background: #cbd5e1; color: #475569; }
+    .updated { color: var(--muted); font-size: .8rem; margin: .6rem 0 0; }
+    canvas { display: block; width: 100%; height: 132px; margin-top: 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .75rem; }
+    .stat { border: 1px solid var(--border); border-radius: 12px; padding: .7rem .8rem; background: #fbfdff; }
+    .stat .k { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; }
+    .stat .v { font-size: 1rem; font-weight: 600; margin-top: .15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: var(--ok); margin-right: .35rem; vertical-align: middle; }
+    .dot.bad { background: var(--err); }
+    .banner { display: none; padding: .6rem .9rem; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: var(--err); font-size: .85rem; margin-bottom: 1rem; }
+    .banner.show { display: block; }
+    footer { text-align: center; color: var(--muted); font-size: .78rem; margin-top: 1.25rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="grow">
+        <h1>T-01C3</h1>
+        <p>IKEA VINDRIKTNING air quality monitor</p>
+      </div>
+      <a class="gear" href="/settings" title="Wi-Fi setup and firmware update">⚙ Settings</a>
+    </header>
+
+    <p class="banner" id="offline">Device unreachable — retrying…</p>
+
+    <section class="card">
+      <div class="hero">
+        <div>
+          <div class="label">PM2.5</div>
+          <div class="reading">
+            <span class="value" id="pm25">—</span>
+            <span class="unit">µg/m³</span>
+          </div>
+        </div>
+        <span class="badge" id="band">waiting</span>
+      </div>
+      <canvas id="chart" width="640" height="132"></canvas>
+      <p class="updated" id="updated">Waiting for the first measurement…</p>
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div class="stat"><div class="k">Sensor</div><div class="v" id="sensor"><span class="dot"></span>—</div></div>
+        <div class="stat"><div class="k">Last sample</div><div class="v" id="age">—</div></div>
+        <div class="stat"><div class="k">Frames ok / bad</div><div class="v" id="frames">—</div></div>
+        <div class="stat"><div class="k">Wi-Fi</div><div class="v" id="wifi">—</div></div>
+        <div class="stat"><div class="k">IP address</div><div class="v" id="ip">—</div></div>
+        <div class="stat"><div class="k">Uptime</div><div class="v" id="uptime">—</div></div>
+        <div class="stat"><div class="k">Free heap</div><div class="v" id="heap">—</div></div>
+        <div class="stat"><div class="k">Firmware</div><div class="v" id="fw">—</div></div>
+      </div>
+    </section>
+
+    <footer>ESP32-C3 · LILYGO T-01C3 · PM1006 via UART</footer>
+  </div>
+
+  <script>
+    const MAX_POINTS = 120;
+    const history = [];
+    const el = id => document.getElementById(id);
+
+    const bands = [
+      { max: 12,       label: 'Good',      full: 'Good',                       color: '#16a34a' },
+      { max: 35.4,     label: 'Moderate',  full: 'Moderate',                   color: '#ca8a04' },
+      { max: 55.4,     label: 'Sensitive', full: 'Unhealthy for sensitive groups', color: '#ea580c' },
+      { max: 150.4,    label: 'Unhealthy', full: 'Unhealthy',                  color: '#dc2626' },
+      { max: Infinity, label: 'Hazardous', full: 'Hazardous',                  color: '#7e22ce' }
+    ];
+    const bandFor = v => bands.find(b => v <= b.max);
+
+    const rootStyle = getComputedStyle(document.documentElement);
+    const accent = rootStyle.getPropertyValue('--accent').trim() || '#2563eb';
+
+    function drawChart() {
+      const canvas = el('chart');
+      const dpr = window.devicePixelRatio || 1;
+      const cssWidth = canvas.clientWidth || 640;
+      const cssHeight = 132;
+      canvas.width = Math.round(cssWidth * dpr);
+      canvas.height = Math.round(cssHeight * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      if (history.length === 0) return;
+
+      const pad = 6;
+      const values = history.map(p => p.v);
+      const peak = Math.max(20, ...values);
+      const top = Math.ceil(peak / 10) * 10;
+      const x = i => pad + (cssWidth - 2 * pad) * (history.length === 1 ? 0.5 : i / (MAX_POINTS - 1));
+      const y = v => cssHeight - pad - (cssHeight - 2 * pad) * (v / top);
+
+      ctx.strokeStyle = '#eef2f7';
+      ctx.lineWidth = 1;
+      for (let g = 0; g <= 2; g++) {
+        const gy = pad + (cssHeight - 2 * pad) * g / 2;
+        ctx.beginPath();
+        ctx.moveTo(pad, gy);
+        ctx.lineTo(cssWidth - pad, gy);
+        ctx.stroke();
+      }
+
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      bands.slice(0, -1).forEach(b => {
+        if (b.max > top) return;
+        const ty = y(b.max);
+        ctx.strokeStyle = b.color + '66';
+        ctx.beginPath();
+        ctx.moveTo(pad, ty);
+        ctx.lineTo(cssWidth - pad, ty);
+        ctx.stroke();
+        ctx.fillStyle = b.color;
+        ctx.fillText(b.max, cssWidth - pad, ty - 3);
+      });
+      ctx.restore();
+
+      const grad = ctx.createLinearGradient(0, 0, 0, cssHeight);
+      grad.addColorStop(0, 'rgba(37, 99, 235, .22)');
+      grad.addColorStop(1, 'rgba(37, 99, 235, 0)');
+
+      ctx.beginPath();
+      history.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.v)) : ctx.moveTo(x(i), y(p.v))));
+      ctx.lineTo(x(history.length - 1), cssHeight - pad);
+      ctx.lineTo(x(0), cssHeight - pad);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.beginPath();
+      history.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.v)) : ctx.moveTo(x(i), y(p.v))));
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      const last = history[history.length - 1];
+      ctx.beginPath();
+      ctx.arc(x(history.length - 1), y(last.v), 3, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+    }
+
+    const fmtUptime = s => {
+      const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+      return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + m + 'm' : m + 'm ' + (s % 60) + 's';
+    };
+
+    let lastValue = null;
+    let lastFramesOk = -1;
+
+    function setValue(text, stale) {
+      const valueEl = el('pm25');
+      valueEl.textContent = text;
+      valueEl.classList.toggle('stale', stale);
+      el('band').classList.toggle('stale', stale);
+    }
+
+    function render(d) {
+      el('offline').classList.remove('show');
+
+      const online = d.sensor_online;
+      // The device always reports its last valid reading, so keep showing it greyed out when stale.
+      if (d.frames_ok > 0) {
+        lastValue = d.pm25;
+      }
+      const band = bandFor(lastValue === null ? 0 : lastValue);
+
+      setValue(lastValue === null ? '--' : lastValue, !online);
+      el('band').textContent = online ? band.label : lastValue === null ? 'no data' : 'offline';
+      el('band').title = online ? band.full : lastValue === null ? 'Waiting for the sensor' : 'Last known value';
+      if (online) el('band').style.background = band.color;
+      else el('band').style.background = '';
+
+      const sensor = el('sensor');
+      sensor.innerHTML = '<span class="dot' + (online ? '' : ' bad') + '"></span>' + (online ? 'Online' : 'Offline');
+      el('age').textContent = d.frames_ok ? (d.age_ms / 1000).toFixed(1) + ' s ago' : 'never';
+      el('frames').textContent = d.frames_ok + ' / ' + d.frames_bad;
+      el('wifi').textContent = d.ssid ? d.ssid + ' (' + d.rssi + ' dBm)' : 'not connected';
+      el('ip').textContent = d.ip || '—';
+      el('uptime').textContent = fmtUptime(d.uptime_s);
+      el('heap').textContent = Math.round(d.heap / 1024) + ' KB';
+      el('fw').textContent = d.fw;
+
+      if (online && d.frames_ok !== lastFramesOk) {
+        lastFramesOk = d.frames_ok;
+        history.push({ v: d.pm25 });
+        if (history.length > MAX_POINTS) history.shift();
+        drawChart();
+      }
+      if (online) {
+        el('updated').textContent = 'Last update ' + new Date().toLocaleTimeString();
+      } else if (d.frames_ok) {
+        el('updated').textContent = 'No new data for ' + Math.round(d.age_ms / 1000) + ' s';
+      }
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/data', { cache: 'no-store' });
+        if (!res.ok) throw new Error(res.status);
+        render(await res.json());
+      } catch (e) {
+        el('offline').classList.add('show');
+        setValue(lastValue === null ? '--' : lastValue, true);
+        el('band').textContent = 'device offline';
+        el('band').style.background = '';
+        el('sensor').innerHTML = '<span class="dot bad"></span>Unknown';
+      }
+    }
+
+    poll();
+    setInterval(poll, 2000);
+    window.addEventListener('resize', drawChart);
+  </script>
+</body>
+</html>

@@ -159,6 +159,19 @@ esp_err_t wifi_manager_scan(wifi_ap_record_t *records, uint16_t max_count, uint1
     return ESP_OK;
 }
 
+esp_err_t wifi_manager_get_ip(char *ip_out, size_t ip_len)
+{
+    if (ip_out == NULL || ip_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_ip[0] == '\0') {
+        ip_out[0] = '\0';
+        return ESP_ERR_INVALID_STATE;
+    }
+    snprintf(ip_out, ip_len, "%s", s_ip);
+    return ESP_OK;
+}
+
 esp_err_t wifi_manager_connect(const char *ssid, const char *password, char *ip_out, size_t ip_len)
 {
     if (ip_out != NULL && ip_len > 0) {
