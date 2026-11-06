@@ -1,12 +1,32 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "mdns.h"
 
 #include "pm1006.h"
 #include "web.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "app";
+
+#define MDNS_HOSTNAME "aqi"
+#define MDNS_INSTANCE "T-01C3 Air Quality Monitor"
+
+static void start_mdns(void)
+{
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "mDNS init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    if ((err = mdns_hostname_set(MDNS_HOSTNAME)) != ESP_OK ||
+        (err = mdns_instance_name_set(MDNS_INSTANCE)) != ESP_OK ||
+        (err = mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0)) != ESP_OK) {
+        ESP_LOGE(TAG, "mDNS announcement failed: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "mDNS ready: http://%s.local", MDNS_HOSTNAME);
+}
 
 static void confirm_ota(void)
 {
@@ -23,6 +43,7 @@ static void confirm_ota(void)
 void app_main(void)
 {
     ESP_ERROR_CHECK(wifi_manager_init());
+    start_mdns();
 
     esp_err_t sensor_err = pm1006_init();
     if (sensor_err != ESP_OK) {
