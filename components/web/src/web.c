@@ -8,7 +8,6 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -70,30 +69,28 @@ static esp_err_t data_handler(httpd_req_t *req)
     }
     bool online = reading.valid && reading.age_ms <= SENSOR_ONLINE_TIMEOUT_MS;
 
-    char ssid[36] = {0};
-    int rssi = 0;
-    wifi_ap_record_t ap;
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        json_escape(ssid, sizeof(ssid), (const char *)ap.ssid);
-        rssi = ap.rssi;
-    }
+    wifi_manager_status_t wifi = {0};
+    wifi_manager_get_status(&wifi);
 
-    char ip[16] = {0};
-    wifi_manager_get_ip(ip, sizeof(ip));
+    char ssid[2 * sizeof(wifi.ssid)] = {0};
+    json_escape(ssid, sizeof(ssid), wifi.ssid);
 
     const esp_app_desc_t *app = esp_app_get_description();
-    char json[512];
+    char json[640];
     int len = snprintf(json, sizeof(json),
                        "{\"pm25\":%u,\"sensor_online\":%s,\"age_ms\":%lu,"
                        "\"frames_ok\":%lu,\"frames_bad\":%lu,\"rx_bytes\":%lu,\"uptime_s\":%lu,"
-                       "\"heap\":%lu,\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\","
+                       "\"heap\":%lu,\"heap_min\":%lu,\"reconnects\":%lu,"
+                       "\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\","
                        "\"fw\":\"%s\",\"idf\":\"%s\"}",
                        reading.pm25, online ? "true" : "false", (unsigned long)reading.age_ms,
                        (unsigned long)reading.frames_ok, (unsigned long)reading.frames_bad,
                        (unsigned long)reading.rx_bytes,
                        (unsigned long)(esp_timer_get_time() / 1000000),
-                       (unsigned long)esp_get_free_heap_size(), ssid, rssi, ip, app->version,
-                       app->idf_ver);
+                       (unsigned long)esp_get_free_heap_size(),
+                       (unsigned long)esp_get_minimum_free_heap_size(),
+                       (unsigned long)wifi.reconnect_attempts, ssid, wifi.rssi, wifi.ip,
+                       app->version, app->idf_ver);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, json, len);
@@ -110,11 +107,22 @@ static esp_err_t scan_handler(httpd_req_t *req)
 
     char json[2048];
     int off = snprintf(json, sizeof(json), "[");
+    bool first = true;
     for (uint16_t i = 0; i < count; i++) {
-        off += snprintf(json + off, sizeof(json) - off, "%s{\"ssid\":\"%s\",\"rssi\":%d}",
-                        i ? "," : "", records[i].ssid, records[i].rssi);
+        char item[2 * sizeof(records[i].ssid) + 32];
+        char ssid[2 * sizeof(records[i].ssid)] = {0};
+        json_escape(ssid, sizeof(ssid), (const char *)records[i].ssid);
+        int n = snprintf(item, sizeof(item), "%s{\"ssid\":\"%s\",\"rssi\":%d}",
+                         first ? "" : ",", ssid, records[i].rssi);
+        if (n < 0 || n >= (int)sizeof(item) || off + n >= (int)sizeof(json) - 1) {
+            continue; /* keep the response well formed if a name does not fit */
+        }
+        memcpy(json + off, item, (size_t)n);
+        off += n;
+        first = false;
     }
-    off += snprintf(json + off, sizeof(json) - off, "]");
+    json[off++] = ']';
+    json[off] = '\0';
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json, off);
 }

@@ -6,7 +6,7 @@ ESP-IDF project for the ESP32-C3 on the [LILYGO T-01C3](https://lilygo.cc/en-us/
 
 - `main/` — thin entry point (init, sensor start, mDNS, OTA rollback confirm).
 - `components/pm1006/` — receive-only UART driver for the Cubic PM1006 sensor (IKEA VINDRIKTNING `REST` pad).
-- `components/wifi_manager/` — AP+STA provisioning, Wi-Fi scan, credential storage in NVS, connect and switch to STA-only.
+- `components/wifi_manager/` — AP+STA provisioning, Wi-Fi scan, credential storage in NVS, connect, background reconnect with backoff, and switch to STA-only.
 - `components/web/` — HTTP server: dashboard (`/`), settings page (`/settings`), JSON API (`/api/data`), scan/connect endpoints, and streaming OTA upload.
 
 ## Pages
@@ -15,7 +15,7 @@ ESP-IDF project for the ESP32-C3 on the [LILYGO T-01C3](https://lilygo.cc/en-us/
 | --- | --- |
 | `/` | Live dashboard: PM2.5 value and band, 4-minute trend, sensor/Wi-Fi/uptime/heap status. |
 | `/settings` | Wi-Fi network provisioning and firmware `.bin` upload. |
-| `/api/data` | JSON snapshot used by the dashboard (`pm25`, `sensor_online`, `age_ms`, `frames_ok`, `frames_bad`, `rx_bytes`, `uptime_s`, `heap`, `ssid`, `rssi`, `ip`, `fw`, `idf`). |
+| `/api/data` | JSON snapshot used by the dashboard (`pm25`, `sensor_online`, `age_ms`, `frames_ok`, `frames_bad`, `rx_bytes`, `uptime_s`, `heap`, `heap_min`, `reconnects`, `ssid`, `rssi`, `ip`, `fw`, `idf`). |
 
 ## Discovery
 
@@ -26,7 +26,13 @@ avahi-resolve -n aqi.local          # aqi.local  192.168.1.42
 avahi-browse -rt _http._tcp         # lists the device
 ```
 
-Rename the host in `main/main.c` if a second device would collide with `aqi.local`.
+Rename the host in `main/main.c` if a second device would collide with `aqi.local`. If the name is already claimed on the network, mDNS renames the device (for example `aqi-2.local`) and logs a warning; the status log below always prints the name actually in use.
+
+Once a minute the device logs a status line with the link state, IP, RSSI, reconnect count, free and minimum-free heap, and the mDNS name, which makes a slow heap leak or a link that keeps dropping visible over a long run:
+
+```text
+I (86400312) app: wifi=up ip=192.168.1.42 rssi=-58 reconnects=1 heap=118640 min_heap=102752 mdns=aqi.local
+```
 
 ## PM2.5 sensor wiring
 
@@ -46,10 +52,12 @@ The RX pin, UART port, and baud rate are configurable under `Component config �
 The device boots in AP+STA mode. The access point password is always `password`; the network name is printed over serial (for example, `T01C3-123456`).
 
 - No saved network: connect to the AP, open `http://192.168.4.1/settings` (or `http://aqi.local/settings`), pick a scanned SSID, enter its password, and connect.
-- On success the device saves the credentials, joins the network, and switches to STA-only mode after a short delay.
+- On success the device saves the credentials, joins the network, and switches to STA-only mode after a short delay. Credentials are only persisted after the link works, so a typo cannot strand the device on the next boot.
 - Saved network: the device connects automatically on boot and switches to STA-only.
 
-To re-provision, erase NVS (`idf.py erase-flash`) or reconnect to the AP before the STA link is established.
+If the link drops, the station reconnects on its own with exponential backoff (5 s, 10 s, 20 s … capped at 5 minutes), so a router reboot or a daily lease change recovers without a power cycle. After four consecutive failures the provisioning AP is re-enabled, so the device is still reachable at `http://192.168.4.1/` while the upstream network is down; it switches back to STA-only once the link is up again. mDNS follows the station interface, so `aqi.local` resolves again as soon as the new IP is leased.
+
+To re-provision, open the settings page while the AP or the home network is reachable.
 
 ## Build and first UART flash
 

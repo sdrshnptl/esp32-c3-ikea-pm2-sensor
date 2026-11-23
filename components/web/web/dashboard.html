@@ -209,7 +209,7 @@
       el('wifi').textContent = d.ssid ? d.ssid + ' (' + d.rssi + ' dBm)' : 'not connected';
       el('ip').textContent = d.ip || '—';
       el('uptime').textContent = fmtUptime(d.uptime_s);
-      el('heap').textContent = Math.round(d.heap / 1024) + ' KB';
+      el('heap').textContent = Math.round(d.heap / 1024) + ' KB (min ' + Math.round(d.heap_min / 1024) + ' KB)';
       el('fw').textContent = d.fw;
 
       if (online && d.frames_ok !== lastFramesOk) {
