@@ -1,5 +1,7 @@
 # LILYGO T-01C3 · IKEA VINDRIKTNING air quality monitor
 
+![alt text](image.png)
+
 ESP-IDF project for the ESP32-C3 on the [LILYGO T-01C3](https://lilygo.cc/en-us/products/t-01c3), reading the particulate sensor inside an IKEA VINDRIKTNING air quality monitor over UART. A built-in web UI shows live PM2.5 data, and Wi-Fi provisioning plus firmware updates live on a separate settings page.
 
 ## Layout
